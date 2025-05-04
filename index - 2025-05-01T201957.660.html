@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spring Coding Challenge - 3D Meadow</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #87CEEB;
+            /* Sky Blue fallback */
+        }
+
+        canvas {
+            display: block;
+        }
+
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: #ffffff;
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            font-family: Arial, sans-serif;
+            font-size: 1.2em;
+            z-index: 10;
+            /* Ensure it's above the canvas */
+        }
+
+        #audioControl {
+            position: absolute;
+            display: flex;
+            flex-direction: column;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            background-color: transparent;
+            padding: 5px;
+            border-radius: 5px;
+        }
+
+        #audioControl label {
+            display: relative;
+            align-items: center;
+            text-align: center;
+            text-decoration: 3px solid underline;
+            line-height: 20px;
+            padding: 4px;
+            color: #333;
+            margin: 5px;
+            font-family: Arial, sans-serif;
+            font-size: 1.5em;
+        }
+
+        audio {
+            background-color: transparent;
+            border: none;
+            outline: none;
+            width: 300px;
+            height: 30px;
+        }
+
+        audio::-webkit-media-controls-enclosure {
+            background-color: transparent;
+        }
+
+        audio::-webkit-media-controls-play-button,
+        audio::-webkit-media-controls-timeline,
+        audio::-webkit-media-controls-volume-slider,
+         {
+            opacity: 0.5;
+        }
+        audio::-webkit-media-controls-current-time-display,
+        audio::-webkit-media-controls-time-remaining-display{
+            display:none;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="info">Spring Coding Challenge: 3D Meadow!<br>Drag to orbit, scroll to zoom.</div>
+
+    <div id="audioControl">
+        <label for="springSong">Spring Vibes:</label>
+        <audio id="springSong" controls loop autoplay controlslist="nodownload noplaybackrate">
+            <source
+                src="https://www.dropbox.com/scl/fi/ojzof33cgtjya0gjdvyxa/butterfly.mp3?rlkey=vg9nf2p3hpiqknrvi8ax2jlik&st=w9mf6i9i&dl=1"
+                type="audio/mpeg">
+            Your browser does not support the audio element.
+        </audio>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.163.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.163.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+        let scene, camera, renderer, controls;
+        let ground, sky;
+        const butterflies = [];
+        const flowers = [];
+        let particles;
+        const clock = new THREE.Clock(); // For animation timing
+        let composer;
+        let bloomPass;
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.fog = new THREE.Fog(0x87CEEB, 50, 150); // Add slight fog for depth
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 15, 40); // Position camera to view the scene
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true; // Enable shadows
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.toneMapping = THREE.ReinhardToneMapping; // or THREE.ACESFilmicToneMapping
+            renderer.toneMappingExposure = 4.0; // Adjust exposure if needed        
+            document.body.appendChild(renderer.domElement);
+
+            // --- Controls ---
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true; // Smooth camera movement
+            controls.dampingFactor = 0.05;
+            controls.screenSpacePanning = false;
+            controls.maxPolarAngle = Math.PI / 2 - 0.1; // Prevent looking straight down or below ground
+            controls.minDistance = 5;
+            controls.maxDistance = 100;
+
+            // --- Lighting ---
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6); // Soft ambient light
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2); // Simulate sunlight
+            const lightPosition = new THREE.Vector3(50, 60, 30);
+            directionalLight.position.copy(lightPosition);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            directionalLight.shadow.camera.near = 0.5;
+            directionalLight.shadow.camera.far = 200;
+            directionalLight.shadow.camera.left = -100;
+            directionalLight.shadow.camera.right = 100;
+            directionalLight.shadow.camera.top = 100;
+            directionalLight.shadow.camera.bottom = -100;
+
+            directionalLight.target.position.set(0, 0, 0);
+            scene.add(directionalLight);
+            scene.add(directionalLight.target);
+
+            // const helper = new THREE.DirectionalLightHelper( directionalLight, 5 ); // Optional: Visualize light source
+            // scene.add( helper );
+            // const shadowHelper = new THREE.CameraHelper( directionalLight.shadow.camera ); // Optional: Visualize shadow frustum
+            // scene.add( shadowHelper );
+
+            const sunGeometry = new THREE.SphereGeometry(10, 32, 32); // Adjust size as needed
+            const sunMaterial = new THREE.MeshBasicMaterial({
+                color: 0xffffe0, // Light yellow/white
+                fog: false // Make sure sun isn't affected by scene fog
+            });
+            const sunMesh = new THREE.Mesh(sunGeometry, sunMaterial);
+            const sunDistance = 400; // How far away the visual sun sphere is
+            sunMesh.position.copy(lightPosition).normalize().multiplyScalar(sunDistance);
+            scene.add(sunMesh);
+
+
+            // --- Background (Sky) ---
+            const skyColorTop = new THREE.Color(0x87CEEB); // Sky Blue
+            const skyColorBottom = new THREE.Color(0xE0F8FF); // Lighter blue/white near horizon
+            scene.background = new THREE.Color(0x87CEEB); // Fallback
+            try { // Gradient background needs canvas texture - more complex setup, using simpler fog for now
+                scene.background = new THREE.Color(0x87CEEB); // Simpler solid color
+                scene.fog = new THREE.Fog(skyColorTop, 50, 150);
+            } catch (e) {
+                console.warn("Could not set gradient background, using solid color.", e);
+                scene.background = new THREE.Color(0x87CEEB);
+            }
+
+
+            // --- Ground ---
+            const groundGeometry = new THREE.PlaneGeometry(500, 500);
+            const groundMaterial = new THREE.MeshStandardMaterial({
+                color: 0x66aa66, // Green grass
+                roughness: 0.9,
+                metalness: 0.1
+            });
+            ground = new THREE.Mesh(groundGeometry, groundMaterial);
+            ground.rotation.x = -Math.PI / 2; // Rotate to be horizontal
+            ground.receiveShadow = true;
+            scene.add(ground);
+
+            // --- Create Scene Elements ---
+            createFlowers(150);
+            createButterflies(15);
+            createParticles(500);
+
+            composer = new EffectComposer(renderer);
+
+            // 1. Render Pass (renders the original scene)
+            const renderPass = new RenderPass(scene, camera);
+            composer.addPass(renderPass);
+
+            // 2. Unreal Bloom Pass (adds the glow)
+            bloomPass = new UnrealBloomPass(
+                new THREE.Vector2(window.innerWidth, window.innerHeight),
+                0.8, // strength - How strong the bloom is (adjust!)
+                0.4, // radius - How far the bloom spreads (adjust!)
+                0.85 // threshold - How bright a pixel needs to be to bloom (0 to 1, adjust!)
+            );
+            composer.addPass(bloomPass);
+
+            // --- Event Listeners ---
+            window.addEventListener('resize', onWindowResize, false);
+
+            // --- Start Animation ---
+            animate();
+        }
+
+        function createFlowers(count) {
+            const stemHeight = 1;
+            const petalRadius = 0.5;
+            const stemGeo = new THREE.CylinderGeometry(0.05, 0.1, stemHeight, 8);
+            const petalGeo = new THREE.SphereGeometry(petalRadius, 16, 8); // Simple sphere for petals
+
+            const stemMat = new THREE.MeshStandardMaterial({ color: 0x006400 }); // Dark Green
+
+            const flowerColors = [0xff69b4, 0xffd700, 0xffa500, 0xadd8e6, 0xdda0dd]; // Pink, Gold, Orange, Light Blue, Plum
+
+            for (let i = 0; i < count; i++) {
+                const flower = new THREE.Group();
+
+                const stem = new THREE.Mesh(stemGeo, stemMat);
+                stem.position.y = stemHeight / 2;
+                stem.castShadow = true;
+                flower.add(stem);
+
+                const petalMat = new THREE.MeshStandardMaterial({
+                    color: flowerColors[Math.floor(Math.random() * flowerColors.length)],
+                    roughness: 0.6
+                });
+                const petal = new THREE.Mesh(petalGeo, petalMat);
+                petal.position.y = stemHeight + petalRadius * 0.8;
+                petal.scale.set(1, 1.2, 1); // Make sphere slightly elongated like petals
+                petal.castShadow = true;
+                flower.add(petal);
+
+                // Random position and slight rotation/scale variation
+                flower.position.set(
+                    (Math.random() - 0.5) * 80, // Spread over a width
+                    0,
+                    (Math.random() - 0.5) * 80 // Spread over a depth
+                );
+                flower.rotation.y = Math.random() * Math.PI * 2;
+                const scale = Math.random() * 0.5 + 0.8; // Random scale between 0.8 and 1.3
+                flower.scale.set(scale, scale, scale);
+
+                // Store for potential animation
+                flower.userData.initialScale = scale; // Store initial scale if we want bloom animation later
+                flower.userData.swaySpeed = Math.random() * 0.5 + 0.2;
+                flower.userData.swayAmount = (Math.random() - 0.5) * 0.05;
+
+                scene.add(flower);
+                flowers.push(flower);
+            }
+        }
+
+        // --- You also need to adjust the animation logic slightly ---
+        function createParticles(count) {
+            const positions = [];
+            const colors = [];
+            const particleGeometry = new THREE.BufferGeometry();
+            const particleMaterial = new THREE.PointsMaterial({
+                size: 0.3,
+                vertexColors: true, // Use colors defined in the geometry
+                transparent: true,
+                opacity: 0.6,
+                sizeAttenuation: true, // Smaller when further away
+                depthWrite: false // Prevent particles obscuring each other weirdly
+            });
+
+            const particleColors = [
+                new THREE.Color(0xffffff), // White
+                new THREE.Color(0xfff79a), // Pale Yellow
+                new THREE.Color(0xbdeff4)  // Pale Blue
+            ];
+
+            for (let i = 0; i < count; i++) {
+                const x = (Math.random() - 0.5) * 100;
+                const y = Math.random() * 30 + 2; // Start at various heights
+                const z = (Math.random() - 0.5) * 100;
+                positions.push(x, y, z);
+
+                // Assign a random color from the list
+                const color = particleColors[Math.floor(Math.random() * particleColors.length)];
+                colors.push(color.r, color.g, color.b);
+            }
+
+            particleGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            particleGeometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+
+            particles = new THREE.Points(particleGeometry, particleMaterial);
+            scene.add(particles);
+        }
+
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        }
+        // --- ENHANCED Procedural Texture function ---
+        function createButterflyTexture() {
+            const canvas = document.createElement('canvas');
+            // Increase resolution slightly for more detail
+            canvas.width = 128;
+            canvas.height = 128;
+            const context = canvas.getContext('2d');
+
+            // 1. Base Color (adjust as desired)
+            const baseColor = `hsl(${Math.random() * 60 + 180}, 70%, 70%)`; // Random cool colors (blues/purples)
+            context.fillStyle = baseColor;
+            context.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 2. Veins (darker lines radiating from a point)
+            context.strokeStyle = 'rgba(0, 0, 0, 0.6)'; // Semi-transparent black
+            context.lineWidth = Math.random() * 1 + 1; // Slightly variable line width
+            context.beginPath();
+            // Define a base point (like where wing attaches) - near bottom-left for default UVs
+            const baseX = canvas.width * 0.1;
+            const baseY = canvas.height * 0.9;
+            // Draw several lines radiating outwards
+            for (let i = 0; i < 5; i++) {
+                context.moveTo(baseX, baseY);
+                const endX = baseX + (Math.random() - 0.2) * canvas.width * 1.1; // Radiate mostly right/up
+                const endY = baseY - (Math.random() * 0.8 + 0.2) * canvas.height; // Radiate mostly up
+                // Add a curve to the veins
+                const cpX = baseX + (endX - baseX) * (Math.random() * 0.5 + 0.25);
+                const cpY = baseY + (endY - baseY) * (Math.random() * 0.5 + 0.25);
+                context.quadraticCurveTo(cpX, cpY, endX, endY);
+            }
+            context.stroke();
+
+            // 3. Spots (a few circles)
+            const spotColor = `hsl(${Math.random() * 360}, 80%, 60%)`; // Contrasting bright color
+            context.fillStyle = spotColor;
+            context.strokeStyle = 'rgba(0, 0, 0, 0.4)'; // Slight dark border for spots
+            context.lineWidth = 1;
+            for (let i = 0; i < 3; i++) {
+                context.beginPath();
+                const spotX = canvas.width * (Math.random() * 0.6 + 0.3); // Avoid edges mostly
+                const spotY = canvas.height * (Math.random() * 0.6 + 0.1);
+                const spotRadius = canvas.width * (Math.random() * 0.05 + 0.05); // 5-10% of width
+                context.arc(spotX, spotY, spotRadius, 0, Math.PI * 2);
+                context.fill();
+                context.stroke();
+            }
+
+            // 4. Edge darkening (optional)
+            context.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+            context.lineWidth = 4;
+            context.strokeRect(0, 0, canvas.width, canvas.height);
+
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.colorSpace = THREE.SRGBColorSpace; // Important for color accuracy
+            texture.needsUpdate = true; // Ensure canvas changes are picked up
+            return texture;
+        }
+
+
+        // --- Helper function to define the wing shape (Unchanged from previous) ---
+        function createButterflyWingShape() {
+            const shape = new THREE.Shape();
+            shape.moveTo(0, 0);
+            shape.quadraticCurveTo(1.5, 1.2, 1.8, 0.5);
+            shape.quadraticCurveTo(1.9, 0.0, 1.7, -0.2);
+            shape.quadraticCurveTo(1.2, -0.8, 0, -0.1);
+            return shape;
+        }
+
+
+        // --- CLEANED UP createButterflies function ---
+        function createButterflies(count) {
+            // Define the wing shape once
+            const wingShape = createButterflyWingShape();
+            const wingGeo = new THREE.ShapeGeometry(wingShape);
+            wingGeo.center(); // Center geometry origin
+
+            const bodyGeo = new THREE.CylinderGeometry(0.1, 0.1, 1, 8);
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.8 }); // Dark body
+
+            // Generate ONE procedural texture per butterfly for variation
+            // We create the material inside the loop now if we want variation per butterfly
+
+            for (let i = 0; i < count; i++) {
+                const butterfly = new THREE.Group();
+
+                // --- Create Material for this specific butterfly ---
+                const wingMat = new THREE.MeshStandardMaterial({
+                    map: createButterflyTexture(), // Generate unique texture per butterfly
+                    side: THREE.DoubleSide, // ESSENTIAL for ShapeGeometry & negative scaling
+                    roughness: 0.7,
+                    metalness: 0.1 // Slight metallic sheen can look nice
+
+                });
+
+                // --- Body ---
+                const body = new THREE.Mesh(bodyGeo, bodyMat);
+                body.rotation.x = Math.PI / 2;
+                body.position.z = -0.5; // Adjust as needed relative to centered wings
+                butterfly.add(body);
+
+                // --- Wings ---
+                // Left Wing
+                const leftWing = new THREE.Mesh(wingGeo, wingMat); // Use the material instance
+                leftWing.position.x = 0;
+                leftWing.position.z = -0.5;
+                //leftWing.rotation.y = Math.PI ;
+                leftWing.rotation.x = -Math.PI / 2;
+                leftWing.rotation.z = Math.PI / 1.5;
+                //leftWing.scale.set(1.5, 1.5, 1.5);
+                leftWing.castShadow = true;
+                butterfly.add(leftWing);
+
+                // Right Wing
+                // CLONE the geometry if needed, but often reusing is fine.
+                // CLONE the material IF they need separate properties later, otherwise reuse.
+                const rightWing = new THREE.Mesh(wingGeo, wingMat);
+                rightWing.position.x = 0;
+                rightWing.position.z = -0.5;
+                //rightWing.rotation.y = -Math.PI / 2;
+                rightWing.rotation.x = -Math.PI / 2;
+                rightWing.rotation.z = Math.PI / 4;
+                //rightWing.scale.set(-1.5, 1.5, 1.5); // Flipped scale on X axis
+                rightWing.castShadow = true;
+                butterfly.add(rightWing);
+
+
+                // --- UserData for Animation --- (Unchanged)
+                butterfly.userData.leftWing = leftWing;
+                butterfly.userData.rightWing = rightWing;
+                butterfly.userData.flapSpeed = Math.random() * 5 + 2;
+                butterfly.userData.flightRadius = Math.random() * 15 + 10;
+                butterfly.userData.flightSpeed = Math.random() * 0.3 + 0.1;
+             
